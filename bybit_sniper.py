@@ -1,3 +1,5 @@
+import os
+from dotenv import load_dotenv
 import ccxt
 import pandas as pd
 import asyncio
@@ -5,6 +7,9 @@ from datetime import timezone
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.request import HTTPXRequest
+
+# Load environment variables
+load_dotenv()
 
 # =============================
 # CONFIG
@@ -22,9 +27,9 @@ TIMEFRAME = '1d'
 LIMIT = 50
 SLEEP_TIME = 300  # scan every 5 minutes
 
-# Telegram
-TELEGRAM_TOKEN = "8237118313:AAFiDkNqiTXcnweghoDcuCopea9d0xVPm20"
-CHAT_ID = "530955355"
+# Telegram - Load from environment
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 
 # Track state
 phase2b_watchlist = set()
