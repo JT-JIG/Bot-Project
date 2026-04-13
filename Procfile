@@ -1,0 +1,1 @@
+worker: python bybit_sniper.py
