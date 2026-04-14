@@ -1,4 +1,5 @@
 import os
+import time
 from dotenv import load_dotenv
 import ccxt
 import pandas as pd
@@ -33,7 +34,7 @@ CHAT_ID = os.getenv('CHAT_ID')
 
 # Track state
 phase2b_watchlist = set()
-alerted_today = set()
+alerted_today = {}  # {symbol: last_alert_timestamp}
 daily_results = []  # store all alerts for daily summary
 
 # Configurable settings (can be changed via /settings)
@@ -83,7 +84,7 @@ async def watchlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def runners_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if alerted_today:
-        msg = "🏃 Today's Runners:\n" + "\n".join(alerted_today)
+        msg = "🏃 Today's Runners:\n" + "\n".join(alerted_today.keys())
     else:
         msg = "📭 No runners detected yet today."
     await update.message.reply_text(msg)
@@ -610,7 +611,9 @@ def scan_market_sync():
                     phase2b_watchlist.discard(symbol)
 
             # --- Daily runner detection (all coins) ---
-            if symbol not in alerted_today:
+            now = time.time()
+            last_alerted = alerted_today.get(symbol, 0)
+            if now - last_alerted >= 3600:
                 result = detect_daily_runner(symbol, df)
                 if result:
                     header = f"{result['type']}: {symbol}"
@@ -629,7 +632,7 @@ def scan_market_sync():
                     })
                     print(header)
                     alerts.append(full_msg)
-                    alerted_today.add(symbol)
+                    alerted_today[symbol] = now
                     daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': sig_type})
 
         except Exception:
