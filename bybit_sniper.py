@@ -49,7 +49,8 @@ settings = {
 # =============================
 # FILTER MAJOR COINS
 # =============================
-EXCLUDED = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE"]
+EXCLUDED = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE",
+            "USDT", "USDC", "TUSD", "BUSD", "DAI", "USDE", "USDP", "FDUSD", "PYUSD"]
 
 # =============================
 # TELEGRAM COMMANDS
@@ -354,7 +355,7 @@ def detect_daily_runner(symbol, df):
 
     vol_trending = (df['volume'].iloc[-1] > df['volume'].iloc[-2] > df['volume'].iloc[-3])
 
-    if vol_ratio_7d >= settings['volume_multiplier'] and price_change > 0:
+    if vol_ratio_7d >= 5.0 and price_change > 0:
         return {
             'type': '🔥 VOLUME EXPLOSION',
             'vol_ratio': vol_ratio_7d,
@@ -362,7 +363,7 @@ def detect_daily_runner(symbol, df):
             'intraday': intraday_change,
         }
 
-    if vol_ratio_7d >= 2 and price_change > 5:
+    if vol_ratio_7d >= 3.5 and price_change > 5:
         return {
             'type': '📈 DAILY RUNNER',
             'vol_ratio': vol_ratio_7d,
@@ -370,7 +371,7 @@ def detect_daily_runner(symbol, df):
             'intraday': intraday_change,
         }
 
-    if vol_ratio_7d >= 1.8 and vol_trending and abs(price_change) < 3:
+    if vol_ratio_7d >= 2.5 and vol_trending and abs(price_change) < 3:
         return {
             'type': '⚡ ACCUMULATION',
             'vol_ratio': vol_ratio_7d,
@@ -378,7 +379,7 @@ def detect_daily_runner(symbol, df):
             'intraday': intraday_change,
         }
 
-    if vol_ratio_14d >= 2.5 and price_change > 0:
+    if vol_ratio_14d >= 4.0 and price_change > 0:
         return {
             'type': '💥 VOLUME BREAKOUT',
             'vol_ratio': vol_ratio_14d,
@@ -562,6 +563,10 @@ def scan_market_sync():
         if "/USDT" not in symbol:
             continue
 
+        # Skip perpetual/futures symbols with duplicate :USDT suffix (e.g. ACU/USDT:USDT)
+        if symbol.count("USDT") > 1:
+            continue
+
         if any(x in symbol for x in EXCLUDED):
             continue
 
@@ -581,6 +586,12 @@ def scan_market_sync():
             if is_fake_pump(df):
                 continue
 
+            # --- Global per-symbol cooldown: skip if alerted in the last hour ---
+            now = time.time()
+            last_alerted = alerted_today.get(symbol, 0)
+            if now - last_alerted < 3600:
+                continue
+
             # --- ORIGINAL: Phase 2B + Surge + Breakout (low-cap gems) ---
             if is_low_cap_gem(df):
                 score = score_phase_2b(df)
@@ -597,7 +608,9 @@ def scan_market_sync():
                     })
                     print(header)
                     alerts.append(full_msg)
+                    alerted_today[symbol] = now
                     daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_surge'})
+                    continue  # one alert per symbol per hour
 
                 if symbol in phase2b_watchlist and is_breakout(df):
                     header = f"🚀 GEM BREAKOUT: {symbol}"
@@ -607,33 +620,32 @@ def scan_market_sync():
                     })
                     print(header)
                     alerts.append(full_msg)
+                    alerted_today[symbol] = now
                     daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'breakout'})
                     phase2b_watchlist.discard(symbol)
+                    continue  # one alert per symbol per hour
 
             # --- Daily runner detection (all coins) ---
-            now = time.time()
-            last_alerted = alerted_today.get(symbol, 0)
-            if now - last_alerted >= 3600:
-                result = detect_daily_runner(symbol, df)
-                if result:
-                    header = f"{result['type']}: {symbol}"
-                    signal_map = {
-                        '🔥 VOLUME EXPLOSION': 'volume_explosion',
-                        '📈 DAILY RUNNER': 'daily_runner',
-                        '⚡ ACCUMULATION': 'accumulation',
-                        '💥 VOLUME BREAKOUT': 'volume_breakout',
-                    }
-                    sig_type = signal_map.get(result['type'], 'daily_runner')
+            result = detect_daily_runner(symbol, df)
+            if result:
+                header = f"{result['type']}: {symbol}"
+                signal_map = {
+                    '🔥 VOLUME EXPLOSION': 'volume_explosion',
+                    '📈 DAILY RUNNER': 'daily_runner',
+                    '⚡ ACCUMULATION': 'accumulation',
+                    '💥 VOLUME BREAKOUT': 'volume_breakout',
+                }
+                sig_type = signal_map.get(result['type'], 'daily_runner')
 
-                    full_msg, composite = format_alert(symbol, sig_type, df, {
-                        'header': header,
-                        'vol_ratio': result['vol_ratio'],
-                        'price_change': result['price_change'],
-                    })
-                    print(header)
-                    alerts.append(full_msg)
-                    alerted_today[symbol] = now
-                    daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': sig_type})
+                full_msg, composite = format_alert(symbol, sig_type, df, {
+                    'header': header,
+                    'vol_ratio': result['vol_ratio'],
+                    'price_change': result['price_change'],
+                })
+                print(header)
+                alerts.append(full_msg)
+                alerted_today[symbol] = now
+                daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': sig_type})
 
         except Exception:
             continue
