@@ -324,6 +324,54 @@ def early_explosion(df):
     return volume_jump and price_still_low
 
 # =============================
+# EARLY ACCUMULATION SETUP
+# =============================
+def detect_early_accumulation(symbol, df):
+    """
+    Catches tokens in the quiet accumulation phase BEFORE they explode.
+    Pattern (RAVE-like): volume steadily building over days, price barely
+    moving — smart money loading up before the breakout.
+
+    Criteria:
+      1. Volume trending UP for 3+ consecutive days
+      2. 7-day volume ratio >= 1.8x (building, not explosive yet)
+      3. Price change -2% to +3% (tight consolidation, not trending hard)
+      4. High/low range < 5% of close (low volatility squeeze)
+    """
+    if len(df) < 10:
+        return None
+
+    vols = df['volume'].values
+    vol_trending_up = (
+        vols[-1] > vols[-2] > vols[-3]
+    )
+
+    vol_7d_avg = df['volume'].iloc[-8:-1].mean()
+    vol_ratio_7d = vols[-1] / (vol_7d_avg + 1e-9)
+
+    price_today = df['close'].iloc[-1]
+    price_yesterday = df['close'].iloc[-2]
+    price_change = (price_today - price_yesterday) / (price_yesterday + 1e-9) * 100
+
+    last = df.iloc[-1]
+    hl_range_pct = (last['high'] - last['low']) / (last['close'] + 1e-9) * 100
+
+    if (
+        vol_trending_up
+        and vol_ratio_7d >= 1.8
+        and -2.0 <= price_change <= 3.0
+        and hl_range_pct < 5.0
+    ):
+        return {
+            'type': '🌀 EARLY ACCUMULATION SETUP',
+            'vol_ratio': vol_ratio_7d,
+            'price_change': price_change,
+            'hl_range_pct': hl_range_pct,
+        }
+
+    return None
+
+# =============================
 # BREAKOUT DETECTION (ORIGINAL)
 # =============================
 def is_breakout(df):
@@ -424,6 +472,7 @@ def calculate_composite_score(df, signal_type, vol_ratio=0):
         'daily_runner': 15,
         'accumulation': 15,
         'volume_breakout': 15,
+        'early_accumulation': 20,  # high value — catches runners before they move
         'early_surge': 10,
     }
     score += type_scores.get(signal_type, 10)
@@ -625,6 +674,21 @@ def scan_market_sync():
                     phase2b_watchlist.discard(symbol)
                     continue  # one alert per symbol per hour
 
+            # --- Early accumulation detection (RAVE-like pre-breakout setup) ---
+            accum = detect_early_accumulation(symbol, df)
+            if accum:
+                header = f"{accum['type']}: {symbol}"
+                full_msg, composite = format_alert(symbol, 'early_accumulation', df, {
+                    'header': header,
+                    'vol_ratio': accum['vol_ratio'],
+                    'price_change': accum['price_change'],
+                })
+                print(header)
+                alerts.append(full_msg)
+                alerted_today[symbol] = now
+                daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_accumulation'})
+                continue  # one alert per symbol per hour
+
             # --- Daily runner detection (all coins) ---
             result = detect_daily_runner(symbol, df)
             if result:
@@ -646,6 +710,7 @@ def scan_market_sync():
                 alerts.append(full_msg)
                 alerted_today[symbol] = now
                 daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': sig_type})
+
 
         except Exception:
             continue
