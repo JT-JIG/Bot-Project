@@ -355,7 +355,7 @@ def detect_daily_runner(symbol, df):
 
     vol_trending = (df['volume'].iloc[-1] > df['volume'].iloc[-2] > df['volume'].iloc[-3])
 
-    if vol_ratio_7d >= 5.0 and price_change > 0:
+    if vol_ratio_7d >= 3.5 and price_change > 0:
         return {
             'type': '🔥 VOLUME EXPLOSION',
             'vol_ratio': vol_ratio_7d,
@@ -363,7 +363,7 @@ def detect_daily_runner(symbol, df):
             'intraday': intraday_change,
         }
 
-    if vol_ratio_7d >= 3.5 and price_change > 5:
+    if vol_ratio_7d >= 2.5 and price_change > 5:
         return {
             'type': '📈 DAILY RUNNER',
             'vol_ratio': vol_ratio_7d,
@@ -371,7 +371,7 @@ def detect_daily_runner(symbol, df):
             'intraday': intraday_change,
         }
 
-    if vol_ratio_7d >= 2.5 and vol_trending and abs(price_change) < 3:
+    if vol_ratio_7d >= 2.0 and vol_trending and abs(price_change) < 5:
         return {
             'type': '⚡ ACCUMULATION',
             'vol_ratio': vol_ratio_7d,
@@ -379,7 +379,7 @@ def detect_daily_runner(symbol, df):
             'intraday': intraday_change,
         }
 
-    if vol_ratio_14d >= 4.0 and price_change > 0:
+    if vol_ratio_14d >= 3.0 and price_change > 0:
         return {
             'type': '💥 VOLUME BREAKOUT',
             'vol_ratio': vol_ratio_14d,
