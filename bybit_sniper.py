@@ -49,8 +49,8 @@ settings = {
 # =============================
 # FILTER MAJOR COINS
 # =============================
-EXCLUDED = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE",
-            "USDT", "USDC", "TUSD", "BUSD", "DAI", "USDE", "USDP", "FDUSD", "PYUSD"]
+EXCLUDED_BASES = {"BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE",
+                  "USDT", "USDC", "TUSD", "BUSD", "DAI", "USDE", "USDP", "FDUSD", "PYUSD"}
 
 # =============================
 # TELEGRAM COMMANDS
@@ -604,7 +604,8 @@ def scan_market_sync():
         if symbol.count("USDT") > 1:
             continue
 
-        if any(x in symbol for x in EXCLUDED):
+        base = symbol.split("/")[0]
+        if base in EXCLUDED_BASES:
             continue
 
         try:
@@ -708,6 +709,9 @@ def scan_market_sync():
             msg += f"{s} → {sc}/100\n"
         print(msg)
         alerts.append(msg)
+
+    scanned = len([s for s in markets if "/USDT" in s and s.split("/")[0] not in EXCLUDED_BASES])
+    print(f"Scanned {scanned} coins, found {len(alerts)} signals")
 
     if not alerts:
         print("No signals detected")
