@@ -24,9 +24,9 @@ exchange = ccxt.bybit({
     'timeout': 30000,
 })
 
-TIMEFRAME = '1d'
+TIMEFRAME = '15m'
 LIMIT = 50
-SLEEP_TIME = 300  # scan every 5 minutes
+SLEEP_TIME = 60  # scan every 1 minute
 
 # Telegram - Load from environment
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -59,9 +59,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🔫 CRIME PUMP SNIPER — ACTIVE\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Bybit · Daily · Every 5 min\n\n"
-        "💎 Gems  ⚡ Surges  🚀 Breakouts\n"
-        "🔥 Explosions  📈 Runners  💥 Wakeups\n\n"
+        "Bybit · 15m · Every 1 min\n\n"
+        "💎 Gems  ⚡ Surges  🚀 Breakouts\n\n"
         "Filters: RSI · BTC Sentiment · Wick\n"
         "Extras: S/R · Entry/TP/SL · Score\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -70,6 +69,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "Stay sharp. Stay ready. 🫡"
     )
+
 
 async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔍 Running manual scan...")
@@ -674,44 +674,6 @@ def scan_market_sync():
                     phase2b_watchlist.discard(symbol)
                     continue  # one alert per symbol per hour
 
-            # --- Early accumulation detection (RAVE-like pre-breakout setup) ---
-            accum = detect_early_accumulation(symbol, df)
-            if accum:
-                header = f"{accum['type']}: {symbol}"
-                full_msg, composite = format_alert(symbol, 'early_accumulation', df, {
-                    'header': header,
-                    'vol_ratio': accum['vol_ratio'],
-                    'price_change': accum['price_change'],
-                })
-                print(header)
-                alerts.append(full_msg)
-                alerted_today[symbol] = now
-                daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_accumulation'})
-                continue  # one alert per symbol per hour
-
-            # --- Daily runner detection (all coins) ---
-            result = detect_daily_runner(symbol, df)
-            if result:
-                header = f"{result['type']}: {symbol}"
-                signal_map = {
-                    '🔥 VOLUME EXPLOSION': 'volume_explosion',
-                    '📈 DAILY RUNNER': 'daily_runner',
-                    '⚡ ACCUMULATION': 'accumulation',
-                    '💥 VOLUME BREAKOUT': 'volume_breakout',
-                }
-                sig_type = signal_map.get(result['type'], 'daily_runner')
-
-                full_msg, composite = format_alert(symbol, sig_type, df, {
-                    'header': header,
-                    'vol_ratio': result['vol_ratio'],
-                    'price_change': result['price_change'],
-                })
-                print(header)
-                alerts.append(full_msg)
-                alerted_today[symbol] = now
-                daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': sig_type})
-
-
         except Exception:
             continue
 
@@ -774,7 +736,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("settings", settings_command))
     app.add_handler(CommandHandler("reset", reset_command))
 
-    # Recurring scan every 5 minutes
+    # Recurring scan every 1 minute
     app.job_queue.run_repeating(scheduled_scan, interval=SLEEP_TIME, first=5)
 
     # Daily summary at 23:55 UTC
