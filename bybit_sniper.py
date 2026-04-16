@@ -261,14 +261,7 @@ def calculate_trade_levels(df):
     }
 
 # =============================
-# GEM FILTER (LOW BASE VOLUME)
-# =============================
-def is_low_cap_gem(df):
-    avg_vol = df['volume'].mean()
-    return avg_vol < 200000
-
-# =============================
-# PHASE 2B SCORE (ORIGINAL)
+# PHASE 2B SCORE
 # =============================
 def score_phase_2b(df):
     score = 0
@@ -305,7 +298,7 @@ def score_phase_2b(df):
     return score
 
 # =============================
-# EARLY VOLUME SURGE (ORIGINAL)
+# EARLY VOLUME SURGE
 # =============================
 def volume_accelerating(df):
     vols = df['volume'].tail(5).values
@@ -327,17 +320,6 @@ def early_explosion(df):
 # EARLY ACCUMULATION SETUP
 # =============================
 def detect_early_accumulation(symbol, df):
-    """
-    Catches tokens in the quiet accumulation phase BEFORE they explode.
-    Pattern (RAVE-like): volume steadily building over days, price barely
-    moving — smart money loading up before the breakout.
-
-    Criteria:
-      1. Volume trending UP for 3+ consecutive days
-      2. 7-day volume ratio >= 1.8x (building, not explosive yet)
-      3. Price change -2% to +3% (tight consolidation, not trending hard)
-      4. High/low range < 5% of close (low volatility squeeze)
-    """
     if len(df) < 10:
         return None
 
@@ -372,7 +354,7 @@ def detect_early_accumulation(symbol, df):
     return None
 
 # =============================
-# BREAKOUT DETECTION (ORIGINAL)
+# BREAKOUT DETECTION
 # =============================
 def is_breakout(df):
     price_now = df['close'].iloc[-1]
@@ -381,56 +363,60 @@ def is_breakout(df):
     return price_now > resistance and df['volume'].iloc[-1] > avg_volume * 2.5
 
 # =============================
-# DAILY RUNNER DETECTION
+# RUNNER DETECTION (tuned for 15m candles)
 # =============================
-def detect_daily_runner(symbol, df):
+def detect_runner(symbol, df):
     if len(df) < 15:
         return None
 
     vol_today = df['volume'].iloc[-1]
-    vol_7d_avg = df['volume'].iloc[-8:-1].mean()
-    vol_14d_avg = df['volume'].iloc[-15:-1].mean()
+    vol_7_avg = df['volume'].iloc[-8:-1].mean()
+    vol_14_avg = df['volume'].iloc[-15:-1].mean()
 
-    price_today = df['close'].iloc[-1]
-    price_yesterday = df['close'].iloc[-2]
-    price_change = (price_today - price_yesterday) / (price_yesterday + 1e-9) * 100
+    price_now = df['close'].iloc[-1]
+    price_prev = df['close'].iloc[-2]
+    price_change = (price_now - price_prev) / (price_prev + 1e-9) * 100
 
     price_open = df['open'].iloc[-1]
-    intraday_change = (price_today - price_open) / (price_open + 1e-9) * 100
+    intraday_change = (price_now - price_open) / (price_open + 1e-9) * 100
 
-    vol_ratio_7d = vol_today / (vol_7d_avg + 1e-9)
-    vol_ratio_14d = vol_today / (vol_14d_avg + 1e-9)
+    vol_ratio_7 = vol_today / (vol_7_avg + 1e-9)
+    vol_ratio_14 = vol_today / (vol_14_avg + 1e-9)
 
     vol_trending = (df['volume'].iloc[-1] > df['volume'].iloc[-2] > df['volume'].iloc[-3])
 
-    if vol_ratio_7d >= 3.5 and price_change > 0:
+    # Volume explosion: big spike vs recent average
+    if vol_ratio_7 >= settings['volume_multiplier'] and price_change > 0:
         return {
             'type': '🔥 VOLUME EXPLOSION',
-            'vol_ratio': vol_ratio_7d,
+            'vol_ratio': vol_ratio_7,
             'price_change': price_change,
             'intraday': intraday_change,
         }
 
-    if vol_ratio_7d >= 2.5 and price_change > 5:
+    # Runner: solid volume + strong price move
+    if vol_ratio_7 >= 2.0 and price_change > 2:
         return {
-            'type': '📈 DAILY RUNNER',
-            'vol_ratio': vol_ratio_7d,
+            'type': '📈 RUNNER',
+            'vol_ratio': vol_ratio_7,
             'price_change': price_change,
             'intraday': intraday_change,
         }
 
-    if vol_ratio_7d >= 2.0 and vol_trending and abs(price_change) < 5:
+    # Accumulation: volume building, price flat
+    if vol_ratio_7 >= 1.5 and vol_trending and abs(price_change) < 3:
         return {
             'type': '⚡ ACCUMULATION',
-            'vol_ratio': vol_ratio_7d,
+            'vol_ratio': vol_ratio_7,
             'price_change': price_change,
             'intraday': intraday_change,
         }
 
-    if vol_ratio_14d >= 3.0 and price_change > 0:
+    # Volume breakout on longer timeframe
+    if vol_ratio_14 >= 2.5 and price_change > 0:
         return {
             'type': '💥 VOLUME BREAKOUT',
-            'vol_ratio': vol_ratio_14d,
+            'vol_ratio': vol_ratio_14,
             'price_change': price_change,
             'intraday': intraday_change,
         }
@@ -470,9 +456,10 @@ def calculate_composite_score(df, signal_type, vol_ratio=0):
         'breakout': 20,
         'volume_explosion': 20,
         'daily_runner': 15,
+        'runner': 15,
         'accumulation': 15,
         'volume_breakout': 15,
-        'early_accumulation': 20,  # high value — catches runners before they move
+        'early_accumulation': 20,
         'early_surge': 10,
     }
     score += type_scores.get(signal_type, 10)
@@ -607,12 +594,13 @@ def scan_market_sync():
     markets = exchange.load_markets()
     phase2b_best = []
     alerts = []
+    now = time.time()
 
     for symbol in markets:
         if "/USDT" not in symbol:
             continue
 
-        # Skip perpetual/futures symbols with duplicate :USDT suffix (e.g. ACU/USDT:USDT)
+        # Skip perpetual/futures symbols with duplicate :USDT suffix
         if symbol.count("USDT") > 1:
             continue
 
@@ -635,16 +623,12 @@ def scan_market_sync():
             if is_fake_pump(df):
                 continue
 
-            # --- Global per-symbol cooldown: skip if alerted in the last hour ---
-            now = time.time()
+            # Per-symbol cooldown: skip if alerted in the last hour
             last_alerted = alerted_today.get(symbol, 0)
             if now - last_alerted < 3600:
                 continue
 
-            # --- Phase 2B + Surge + Breakout (all coins — 15m intraday scan) ---
-            # is_low_cap_gem() removed: its 200k avg-volume threshold was designed
-            # for daily candles and blocks virtually every coin on 15m data.
-            # Phase2b scoring and volume detection now do the filtering instead.
+            # --- Phase 2B + Surge + Breakout ---
             score = score_phase_2b(df)
             if score >= 75:
                 phase2b_best.append((symbol, score))
@@ -661,7 +645,7 @@ def scan_market_sync():
                 alerts.append(full_msg)
                 alerted_today[symbol] = now
                 daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_surge'})
-                continue  # one alert per symbol per hour
+                continue
 
             if symbol in phase2b_watchlist and is_breakout(df):
                 header = f"🚀 GEM BREAKOUT: {symbol}"
@@ -674,7 +658,44 @@ def scan_market_sync():
                 alerted_today[symbol] = now
                 daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'breakout'})
                 phase2b_watchlist.discard(symbol)
-                continue  # one alert per symbol per hour
+                continue
+
+            # --- Runner detection (all coins) ---
+            result = detect_runner(symbol, df)
+            if result:
+                header = f"{result['type']}: {symbol}"
+                signal_map = {
+                    '🔥 VOLUME EXPLOSION': 'volume_explosion',
+                    '📈 RUNNER': 'runner',
+                    '⚡ ACCUMULATION': 'accumulation',
+                    '💥 VOLUME BREAKOUT': 'volume_breakout',
+                }
+                sig_type = signal_map.get(result['type'], 'runner')
+
+                full_msg, composite = format_alert(symbol, sig_type, df, {
+                    'header': header,
+                    'vol_ratio': result['vol_ratio'],
+                    'price_change': result['price_change'],
+                })
+                print(header)
+                alerts.append(full_msg)
+                alerted_today[symbol] = now
+                daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': sig_type})
+                continue
+
+            # --- Early accumulation detection ---
+            accum = detect_early_accumulation(symbol, df)
+            if accum:
+                header = f"{accum['type']}: {symbol}"
+                full_msg, composite = format_alert(symbol, 'early_accumulation', df, {
+                    'header': header,
+                    'vol_ratio': accum['vol_ratio'],
+                    'price_change': accum['price_change'],
+                })
+                print(header)
+                alerts.append(full_msg)
+                alerted_today[symbol] = now
+                daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_accumulation'})
 
         except Exception:
             continue
