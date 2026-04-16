@@ -641,38 +641,40 @@ def scan_market_sync():
             if now - last_alerted < 3600:
                 continue
 
-            # --- ORIGINAL: Phase 2B + Surge + Breakout (low-cap gems) ---
-            if is_low_cap_gem(df):
-                score = score_phase_2b(df)
-                if score >= 75:
-                    phase2b_best.append((symbol, score))
-                    phase2b_watchlist.add(symbol)
+            # --- Phase 2B + Surge + Breakout (all coins — 15m intraday scan) ---
+            # is_low_cap_gem() removed: its 200k avg-volume threshold was designed
+            # for daily candles and blocks virtually every coin on 15m data.
+            # Phase2b scoring and volume detection now do the filtering instead.
+            score = score_phase_2b(df)
+            if score >= 75:
+                phase2b_best.append((symbol, score))
+                phase2b_watchlist.add(symbol)
 
-                if volume_accelerating(df) and early_explosion(df):
-                    header = f"⚡ EARLY VOLUME SURGE: {symbol}"
-                    full_msg, composite = format_alert(symbol, 'early_surge', df, {
-                        'header': header,
-                        'vol_ratio': df['volume'].iloc[-1] / (df['volume'].iloc[-2] + 1e-9),
-                        'price_change': (df['close'].iloc[-1] - df['close'].iloc[-2]) / (df['close'].iloc[-2] + 1e-9) * 100,
-                    })
-                    print(header)
-                    alerts.append(full_msg)
-                    alerted_today[symbol] = now
-                    daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_surge'})
-                    continue  # one alert per symbol per hour
+            if volume_accelerating(df) and early_explosion(df):
+                header = f"⚡ EARLY VOLUME SURGE: {symbol}"
+                full_msg, composite = format_alert(symbol, 'early_surge', df, {
+                    'header': header,
+                    'vol_ratio': df['volume'].iloc[-1] / (df['volume'].iloc[-2] + 1e-9),
+                    'price_change': (df['close'].iloc[-1] - df['close'].iloc[-2]) / (df['close'].iloc[-2] + 1e-9) * 100,
+                })
+                print(header)
+                alerts.append(full_msg)
+                alerted_today[symbol] = now
+                daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_surge'})
+                continue  # one alert per symbol per hour
 
-                if symbol in phase2b_watchlist and is_breakout(df):
-                    header = f"🚀 GEM BREAKOUT: {symbol}"
-                    full_msg, composite = format_alert(symbol, 'breakout', df, {
-                        'header': header,
-                        'vol_ratio': df['volume'].iloc[-1] / (df['volume'][:-1].mean() + 1e-9),
-                    })
-                    print(header)
-                    alerts.append(full_msg)
-                    alerted_today[symbol] = now
-                    daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'breakout'})
-                    phase2b_watchlist.discard(symbol)
-                    continue  # one alert per symbol per hour
+            if symbol in phase2b_watchlist and is_breakout(df):
+                header = f"🚀 GEM BREAKOUT: {symbol}"
+                full_msg, composite = format_alert(symbol, 'breakout', df, {
+                    'header': header,
+                    'vol_ratio': df['volume'].iloc[-1] / (df['volume'][:-1].mean() + 1e-9),
+                })
+                print(header)
+                alerts.append(full_msg)
+                alerted_today[symbol] = now
+                daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'breakout'})
+                phase2b_watchlist.discard(symbol)
+                continue  # one alert per symbol per hour
 
         except Exception:
             continue
