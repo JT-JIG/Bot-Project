@@ -44,6 +44,8 @@ settings = {
     'btc_dump_threshold': -5.0,  # BTC daily % drop to pause scanning
     'volume_multiplier': 3.0,    # volume explosion threshold
     'wick_ratio': 0.6,           # wick-to-body ratio for fake pump filter
+    'min_score': 50,             # only alert on score >= this (B grade or higher)
+    'max_alerts_per_scan': 10,   # cap alerts per scan cycle
 }
 
 # =============================
@@ -112,7 +114,9 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"RSI Oversold: {settings['rsi_oversold']}\n"
             f"BTC Dump Threshold: {settings['btc_dump_threshold']}%\n"
             f"Volume Multiplier: {settings['volume_multiplier']}x\n"
-            f"Wick Ratio Filter: {settings['wick_ratio']}\n\n"
+            f"Wick Ratio Filter: {settings['wick_ratio']}\n"
+            f"Min Score: {settings['min_score']}\n"
+            f"Max Alerts/Scan: {settings['max_alerts_per_scan']}\n\n"
             "To change: /settings <key> <value>\n"
             "Example: /settings volume_multiplier 4.0"
         )
@@ -489,54 +493,32 @@ def format_alert(symbol, signal_type, df, extra_info=""):
         vol_ratio=extra_info.get('vol_ratio', 0) if isinstance(extra_info, dict) else 0
     )
 
-    # RSI label
-    if rsi > settings['rsi_overbought']:
-        rsi_label = "⚠️ OVERBOUGHT"
-    elif rsi < settings['rsi_oversold']:
-        rsi_label = "🟢 OVERSOLD"
-    else:
-        rsi_label = "NEUTRAL"
-
     # Score label
     if composite >= 80:
-        grade = "🔥 A+"
+        grade = "🔥A+"
     elif composite >= 65:
-        grade = "✅ A"
+        grade = "✅A"
     elif composite >= 50:
-        grade = "🟡 B"
+        grade = "🟡B"
     else:
-        grade = "⚪ C"
+        grade = "⚪C"
 
-    msg = ""
+    header = ""
     if isinstance(extra_info, dict) and 'header' in extra_info:
-        msg += f"{extra_info['header']}\n"
+        header = extra_info['header']
 
-    msg += (
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 RSI: {rsi:.1f} ({rsi_label})\n"
-        f"🏆 Score: {composite}/100 ({grade})\n"
-    )
-
+    vol_str = ""
+    chg_str = ""
     if isinstance(extra_info, dict):
         if 'vol_ratio' in extra_info:
-            msg += f"📦 Volume: {extra_info['vol_ratio']:.1f}x avg\n"
+            vol_str = f" | Vol {extra_info['vol_ratio']:.1f}x"
         if 'price_change' in extra_info:
-            msg += f"📈 Change: {extra_info['price_change']:+.2f}%\n"
+            chg_str = f" | {extra_info['price_change']:+.1f}%"
 
-    msg += (
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🎯 TRADE SETUP:\n"
-        f"Entry: ${levels['entry']:.6g}\n"
-        f"SL: ${levels['sl']:.6g}\n"
-        f"TP1: ${levels['tp1']:.6g}\n"
-        f"TP2: ${levels['tp2']:.6g}\n"
-        f"TP3: ${levels['tp3']:.6g}\n"
-        f"R:R — {levels['rr']:.1f}\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📐 Support: ${levels['support']:.6g}\n"
-        f"📐 Resistance: ${levels['resistance']:.6g}\n"
-        f"📏 ATR: ${levels['atr']:.6g}\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
+    msg = (
+        f"{header}\n"
+        f"{grade} {composite}/100 | RSI {rsi:.0f}{vol_str}{chg_str}\n"
+        f"Entry ${levels['entry']:.6g} → TP ${levels['tp1']:.6g} / ${levels['tp2']:.6g} | SL ${levels['sl']:.6g} (R:R {levels['rr']:.1f})"
     )
 
     return msg, composite
@@ -642,9 +624,10 @@ def scan_market_sync():
                     'vol_ratio': df['volume'].iloc[-1] / (df['volume'].iloc[-2] + 1e-9),
                     'price_change': (df['close'].iloc[-1] - df['close'].iloc[-2]) / (df['close'].iloc[-2] + 1e-9) * 100,
                 })
-                print(header)
-                alerts.append(full_msg)
-                alerted_today[symbol] = now
+                if composite >= settings['min_score']:
+                    print(header)
+                    alerts.append((full_msg, composite))
+                    alerted_today[symbol] = now
                 daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_surge'})
                 continue
 
@@ -654,9 +637,10 @@ def scan_market_sync():
                     'header': header,
                     'vol_ratio': df['volume'].iloc[-1] / (df['volume'][:-1].mean() + 1e-9),
                 })
-                print(header)
-                alerts.append(full_msg)
-                alerted_today[symbol] = now
+                if composite >= settings['min_score']:
+                    print(header)
+                    alerts.append((full_msg, composite))
+                    alerted_today[symbol] = now
                 daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'breakout'})
                 phase2b_watchlist.discard(symbol)
                 continue
@@ -678,9 +662,10 @@ def scan_market_sync():
                     'vol_ratio': result['vol_ratio'],
                     'price_change': result['price_change'],
                 })
-                print(header)
-                alerts.append(full_msg)
-                alerted_today[symbol] = now
+                if composite >= settings['min_score']:
+                    print(header)
+                    alerts.append((full_msg, composite))
+                    alerted_today[symbol] = now
                 daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': sig_type})
                 continue
 
@@ -693,36 +678,52 @@ def scan_market_sync():
                     'vol_ratio': accum['vol_ratio'],
                     'price_change': accum['price_change'],
                 })
-                print(header)
-                alerts.append(full_msg)
-                alerted_today[symbol] = now
+                if composite >= settings['min_score']:
+                    print(header)
+                    alerts.append((full_msg, composite))
+                    alerted_today[symbol] = now
                 daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_accumulation'})
 
         except Exception:
             continue
 
+    # Sort by score (best first) and cap
+    alerts.sort(key=lambda x: x[1], reverse=True)
+    max_alerts = int(settings['max_alerts_per_scan'])
+    top_alerts = [msg for msg, score in alerts[:max_alerts]]
+
     # Phase 2B summary
     phase2b_best.sort(key=lambda x: x[1], reverse=True)
     if phase2b_best:
-        msg = "💎 BYBIT GEM SETUPS:\n"
-        for s, sc in phase2b_best[:3]:
-            msg += f"{s} → {sc}/100\n"
+        msg = "💎 GEM SETUPS: " + " | ".join(f"{s} {sc}/100" for s, sc in phase2b_best[:3])
         print(msg)
-        alerts.append(msg)
+        top_alerts.append(msg)
 
     scanned = len([s for s in markets if "/USDT" in s and s.split("/")[0] not in EXCLUDED_BASES])
-    print(f"Scanned {scanned} coins, found {len(alerts)} signals")
+    print(f"Scanned {scanned} coins, found {len(alerts)} signals (showing top {len(top_alerts)})")
 
-    if not alerts:
+    if not top_alerts:
         print("No signals detected")
 
-    return alerts
+    return top_alerts
 
 async def run_scan(bot: Bot):
     loop = asyncio.get_event_loop()
     alerts = await loop.run_in_executor(None, scan_market_sync)
-    for msg in alerts:
-        await bot.send_message(chat_id=CHAT_ID, text=msg)
+    if not alerts:
+        return
+    # Batch all alerts into one message (Telegram limit 4096 chars)
+    batch = "\n━━━━━━━━━━━━━━━━━━━━━━\n".join(alerts)
+    # Split if too long for Telegram
+    while batch:
+        chunk = batch[:4000]
+        # Try to split at a separator boundary
+        if len(batch) > 4000:
+            last_sep = chunk.rfind("━━━")
+            if last_sep > 0:
+                chunk = batch[:last_sep]
+        await bot.send_message(chat_id=CHAT_ID, text=chunk)
+        batch = batch[len(chunk):].lstrip("━\n ")
 
 # =============================
 # BACKGROUND SCANNER
