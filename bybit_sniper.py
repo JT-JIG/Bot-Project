@@ -38,7 +38,7 @@ exchange_perp = ccxt.bybit({
 
 TIMEFRAME = '15m'
 LIMIT = 50
-SLEEP_TIME = 900  # scan every 15 min (matches candle timeframe)
+SLEEP_TIME = 3600  # scan every 60 min
 
 # Telegram - Load from environment
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -76,7 +76,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  <b>Status:</b>  🟢 Active\n"
         "  <b>Market:</b>  Bybit Spot + Perp\n"
         "  <b>Interval:</b>  15m candles\n"
-        "  <b>Scan:</b>  Every 15 min\n\n"
+        "  <b>Scan:</b>  Every 60 min\n\n"
         "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n"
         "  /scan        Manual scan\n"
         "  /watchlist   Gem watchlist\n"
