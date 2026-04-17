@@ -25,6 +25,17 @@ exchange = ccxt.bybit({
     'timeout': 30000,
 })
 
+# Second exchange instance for perpetual/linear markets
+# Many tokens (RAVE, SIREN, MYX, COAI etc) only have perp pairs
+exchange_perp = ccxt.bybit({
+    'options': {
+        'defaultType': 'linear',
+        'adjustForTimeDifference': True,
+    },
+    'enableRateLimit': True,
+    'timeout': 30000,
+})
+
 TIMEFRAME = '15m'
 LIMIT = 50
 SLEEP_TIME = 60  # scan every 1 minute
@@ -40,13 +51,13 @@ daily_results = []  # store all alerts for daily summary
 
 # Configurable settings (can be changed via /settings)
 settings = {
-    'rsi_overbought': 70,
+    'rsi_overbought': 80,        # raised from 70 — runners run hot, don't filter too early
     'rsi_oversold': 30,
-    'btc_dump_threshold': -5.0,  # BTC daily % drop to pause scanning
-    'volume_multiplier': 3.0,    # volume explosion threshold
-    'wick_ratio': 0.6,           # wick-to-body ratio for fake pump filter
-    'min_score': 50,             # only alert on score >= this (B grade or higher)
-    'max_alerts_per_scan': 10,   # cap alerts per scan cycle
+    'btc_dump_threshold': -5.0,
+    'volume_multiplier': 3.0,
+    'wick_ratio': 0.6,
+    'min_score': 50,
+    'max_alerts_per_scan': 10,
 }
 
 # =============================
@@ -63,7 +74,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>CRIME PUMP SNIPER</b>\n"
         "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n"
         "  <b>Status:</b>  🟢 Active\n"
-        "  <b>Market:</b>  Bybit Spot\n"
+        "  <b>Market:</b>  Bybit Spot + Perp\n"
         "  <b>Interval:</b>  15m candles\n"
         "  <b>Scan:</b>  Every 60s\n\n"
         "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n"
@@ -365,6 +376,48 @@ def detect_early_accumulation(symbol, df):
     return None
 
 # =============================
+# MOMENTUM DETECTOR (pattern from RAVE/SIREN/MYX/COAI/ORDI analysis)
+# 3+ consecutive green candles with rising volume = smart money loading
+# =============================
+def detect_momentum(symbol, df):
+    if len(df) < 10:
+        return None
+
+    # Check last 3 candles: all green + volume rising
+    c1 = df.iloc[-3]
+    c2 = df.iloc[-2]
+    c3 = df.iloc[-1]
+
+    three_green = (c1['close'] > c1['open'] and
+                   c2['close'] > c2['open'] and
+                   c3['close'] > c3['open'])
+
+    vol_rising = (c3['volume'] > c2['volume'] > c1['volume'])
+
+    if not (three_green and vol_rising):
+        return None
+
+    # Volume should be at least 1.3x the 7-candle average
+    vol_7_avg = df['volume'].iloc[-10:-3].mean()
+    vol_ratio = c3['volume'] / (vol_7_avg + 1e-9)
+
+    if vol_ratio < 1.3:
+        return None
+
+    # Price change over the 3 candles
+    price_change = (c3['close'] - c1['open']) / (c1['open'] + 1e-9) * 100
+
+    # Reject if price already moved too much (late entry)
+    if price_change > 15:
+        return None
+
+    return {
+        'type': '🟢 MOMENTUM',
+        'vol_ratio': vol_ratio,
+        'price_change': price_change,
+    }
+
+# =============================
 # BREAKOUT DETECTION
 # =============================
 def is_breakout(df):
@@ -471,6 +524,7 @@ def calculate_composite_score(df, signal_type, vol_ratio=0):
         'accumulation': 15,
         'volume_breakout': 15,
         'early_accumulation': 20,
+        'momentum': 18,
         'early_surge': 10,
     }
     score += type_scores.get(signal_type, 10)
@@ -519,6 +573,7 @@ def format_alert(symbol, signal_type, df, extra_info=""):
         'early_surge': '⚡ Surge',
         'breakout': '🚀 Breakout',
         'early_accumulation': '🌀 Early Accum',
+        'momentum': '🟢 Momentum',
     }
     label = type_labels.get(signal_type, signal_type)
 
@@ -589,6 +644,109 @@ def build_daily_summary():
 # =============================
 # SCAN MARKET (COMBINED)
 # =============================
+def scan_symbol(symbol, ex, now, phase2b_best, alerts):
+    """Scan a single symbol for all signal types. Returns True if alerted."""
+    try:
+        ohlcv = ex.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=LIMIT)
+        df = pd.DataFrame(ohlcv, columns=['time','open','high','low','close','volume'])
+    except Exception:
+        return
+
+    if len(df) < 15:
+        return
+
+    rsi = calculate_rsi(df)
+
+    if rsi > settings['rsi_overbought']:
+        return
+
+    if is_fake_pump(df):
+        return
+
+    # Per-symbol cooldown
+    last_alerted = alerted_today.get(symbol, 0)
+    if now - last_alerted < 3600:
+        return
+
+    # --- Phase 2B + Surge + Breakout ---
+    score = score_phase_2b(df)
+    if score >= 75:
+        phase2b_best.append((symbol, score))
+        phase2b_watchlist.add(symbol)
+
+    if volume_accelerating(df) and early_explosion(df):
+        full_msg, composite = format_alert(symbol, 'early_surge', df, {
+            'vol_ratio': df['volume'].iloc[-1] / (df['volume'].iloc[-2] + 1e-9),
+            'price_change': (df['close'].iloc[-1] - df['close'].iloc[-2]) / (df['close'].iloc[-2] + 1e-9) * 100,
+        })
+        if composite >= settings['min_score']:
+            print(f"early_surge: {symbol} ({composite})")
+            alerts.append((full_msg, composite))
+            alerted_today[symbol] = now
+        daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_surge'})
+        return
+
+    if symbol in phase2b_watchlist and is_breakout(df):
+        full_msg, composite = format_alert(symbol, 'breakout', df, {
+            'vol_ratio': df['volume'].iloc[-1] / (df['volume'][:-1].mean() + 1e-9),
+        })
+        if composite >= settings['min_score']:
+            print(f"breakout: {symbol} ({composite})")
+            alerts.append((full_msg, composite))
+            alerted_today[symbol] = now
+        daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'breakout'})
+        phase2b_watchlist.discard(symbol)
+        return
+
+    # --- Runner detection ---
+    result = detect_runner(symbol, df)
+    if result:
+        signal_map = {
+            '🔥 VOLUME EXPLOSION': 'volume_explosion',
+            '📈 RUNNER': 'runner',
+            '⚡ ACCUMULATION': 'accumulation',
+            '💥 VOLUME BREAKOUT': 'volume_breakout',
+        }
+        sig_type = signal_map.get(result['type'], 'runner')
+        full_msg, composite = format_alert(symbol, sig_type, df, {
+            'vol_ratio': result['vol_ratio'],
+            'price_change': result['price_change'],
+        })
+        if composite >= settings['min_score']:
+            print(f"{sig_type}: {symbol} ({composite})")
+            alerts.append((full_msg, composite))
+            alerted_today[symbol] = now
+        daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': sig_type})
+        return
+
+    # --- Momentum detection (3 green candles + rising volume) ---
+    mom = detect_momentum(symbol, df)
+    if mom:
+        full_msg, composite = format_alert(symbol, 'momentum', df, {
+            'vol_ratio': mom['vol_ratio'],
+            'price_change': mom['price_change'],
+        })
+        if composite >= settings['min_score']:
+            print(f"momentum: {symbol} ({composite})")
+            alerts.append((full_msg, composite))
+            alerted_today[symbol] = now
+        daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'momentum'})
+        return
+
+    # --- Early accumulation detection ---
+    accum = detect_early_accumulation(symbol, df)
+    if accum:
+        full_msg, composite = format_alert(symbol, 'early_accumulation', df, {
+            'vol_ratio': accum['vol_ratio'],
+            'price_change': accum['price_change'],
+        })
+        if composite >= settings['min_score']:
+            print(f"early_accumulation: {symbol} ({composite})")
+            alerts.append((full_msg, composite))
+            alerted_today[symbol] = now
+        daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_accumulation'})
+
+
 def scan_market_sync():
     # BTC sentiment check
     btc_dumping, btc_change = is_btc_dumping()
@@ -602,111 +760,37 @@ def scan_market_sync():
         print(f"BTC dump: {btc_change:+.2f}%")
         return [msg]
 
-    markets = exchange.load_markets()
     phase2b_best = []
     alerts = []
     now = time.time()
+    scanned = 0
+    seen_bases = set()
 
-    for symbol in markets:
-        if "/USDT" not in symbol:
+    # --- Scan SPOT markets ---
+    spot_markets = exchange.load_markets()
+    for symbol in spot_markets:
+        if "/USDT" not in symbol or symbol.count("USDT") > 1:
             continue
-
-        # Skip perpetual/futures symbols with duplicate :USDT suffix
-        if symbol.count("USDT") > 1:
-            continue
-
         base = symbol.split("/")[0]
         if base in EXCLUDED_BASES:
             continue
+        seen_bases.add(base)
+        scanned += 1
+        scan_symbol(symbol, exchange, now, phase2b_best, alerts)
 
-        try:
-            df = get_data(symbol)
-
-            if len(df) < 15:
+    # --- Scan PERP markets (catches tokens without spot pairs) ---
+    try:
+        perp_markets = exchange_perp.load_markets()
+        for symbol in perp_markets:
+            if "/USDT:USDT" not in symbol:
                 continue
-
-            rsi = calculate_rsi(df)
-
-            # Skip overbought coins
-            if rsi > settings['rsi_overbought']:
-                continue
-
-            # Skip fake pumps
-            if is_fake_pump(df):
-                continue
-
-            # Per-symbol cooldown: skip if alerted in the last hour
-            last_alerted = alerted_today.get(symbol, 0)
-            if now - last_alerted < 3600:
-                continue
-
-            # --- Phase 2B + Surge + Breakout ---
-            score = score_phase_2b(df)
-            if score >= 75:
-                phase2b_best.append((symbol, score))
-                phase2b_watchlist.add(symbol)
-
-            if volume_accelerating(df) and early_explosion(df):
-                full_msg, composite = format_alert(symbol, 'early_surge', df, {
-                    'vol_ratio': df['volume'].iloc[-1] / (df['volume'].iloc[-2] + 1e-9),
-                    'price_change': (df['close'].iloc[-1] - df['close'].iloc[-2]) / (df['close'].iloc[-2] + 1e-9) * 100,
-                })
-                if composite >= settings['min_score']:
-                    print(f"early_surge: {symbol} ({composite})")
-                    alerts.append((full_msg, composite))
-                    alerted_today[symbol] = now
-                daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_surge'})
-                continue
-
-            if symbol in phase2b_watchlist and is_breakout(df):
-                full_msg, composite = format_alert(symbol, 'breakout', df, {
-                    'vol_ratio': df['volume'].iloc[-1] / (df['volume'][:-1].mean() + 1e-9),
-                })
-                if composite >= settings['min_score']:
-                    print(f"breakout: {symbol} ({composite})")
-                    alerts.append((full_msg, composite))
-                    alerted_today[symbol] = now
-                daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'breakout'})
-                phase2b_watchlist.discard(symbol)
-                continue
-
-            # --- Runner detection (all coins) ---
-            result = detect_runner(symbol, df)
-            if result:
-                signal_map = {
-                    '🔥 VOLUME EXPLOSION': 'volume_explosion',
-                    '📈 RUNNER': 'runner',
-                    '⚡ ACCUMULATION': 'accumulation',
-                    '💥 VOLUME BREAKOUT': 'volume_breakout',
-                }
-                sig_type = signal_map.get(result['type'], 'runner')
-
-                full_msg, composite = format_alert(symbol, sig_type, df, {
-                    'vol_ratio': result['vol_ratio'],
-                    'price_change': result['price_change'],
-                })
-                if composite >= settings['min_score']:
-                    print(f"{sig_type}: {symbol} ({composite})")
-                    alerts.append((full_msg, composite))
-                    alerted_today[symbol] = now
-                daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': sig_type})
-                continue
-
-            # --- Early accumulation detection ---
-            accum = detect_early_accumulation(symbol, df)
-            if accum:
-                full_msg, composite = format_alert(symbol, 'early_accumulation', df, {
-                    'vol_ratio': accum['vol_ratio'],
-                    'price_change': accum['price_change'],
-                })
-                if composite >= settings['min_score']:
-                    print(f"early_accumulation: {symbol} ({composite})")
-                    alerts.append((full_msg, composite))
-                    alerted_today[symbol] = now
-                daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_accumulation'})
-
-        except Exception:
-            continue
+            base = symbol.split("/")[0]
+            if base in EXCLUDED_BASES or base in seen_bases:
+                continue  # skip if already scanned on spot
+            scanned += 1
+            scan_symbol(symbol, exchange_perp, now, phase2b_best, alerts)
+    except Exception as e:
+        print(f"Perp scan error: {e}")
 
     # Sort by score (best first) and cap
     alerts.sort(key=lambda x: x[1], reverse=True)
@@ -716,13 +800,12 @@ def scan_market_sync():
     # Phase 2B summary
     phase2b_best.sort(key=lambda x: x[1], reverse=True)
     if phase2b_best:
-        lines = "\n".join(f"  • <b>{s}</b>  {sc}/100" for s, sc in phase2b_best[:3])
-        msg = f"<b>💎 Gem Setups</b>\n{lines}"
+        lines = "\n".join(f"  - <b>{s}</b>  {sc}/100" for s, sc in phase2b_best[:3])
+        msg = f"<b>Gem Setups</b>\n{lines}"
         print(f"Gems: {[s for s,_ in phase2b_best[:3]]}")
         top_alerts.append(msg)
 
-    scanned = len([s for s in markets if "/USDT" in s and s.split("/")[0] not in EXCLUDED_BASES])
-    print(f"Scanned {scanned} coins, found {len(alerts)} signals (showing top {len(top_alerts)})")
+    print(f"Scanned {scanned} coins (spot+perp), found {len(alerts)} signals (showing top {len(top_alerts)})")
 
     if not top_alerts:
         print("No signals detected")
