@@ -6,6 +6,7 @@ import pandas as pd
 import asyncio
 from datetime import timezone
 from telegram import Bot, Update
+from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.request import HTTPXRequest
 
@@ -58,69 +59,75 @@ EXCLUDED_BASES = {"BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE",
 # TELEGRAM COMMANDS
 # =============================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🔫 CRIME PUMP SNIPER — ACTIVE\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Bybit · 15m · Every 1 min\n\n"
-        "💎 Gems  ⚡ Surges  🚀 Breakouts\n\n"
-        "Filters: RSI · BTC Sentiment · Wick\n"
-        "Extras: S/R · Entry/TP/SL · Score\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "/scan · /watchlist · /runners\n"
-        "/summary · /settings · /reset\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Stay sharp. Stay ready. 🫡"
+    msg = (
+        "<b>CRIME PUMP SNIPER</b>\n"
+        "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n"
+        "  <b>Status:</b>  🟢 Active\n"
+        "  <b>Market:</b>  Bybit Spot\n"
+        "  <b>Interval:</b>  15m candles\n"
+        "  <b>Scan:</b>  Every 60s\n\n"
+        "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n"
+        "  /scan        Manual scan\n"
+        "  /watchlist   Gem watchlist\n"
+        "  /runners     Today's alerts\n"
+        "  /summary     Daily report\n"
+        "  /settings    Configure\n"
+        "  /reset       Clear alerts\n\n"
+        "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔"
     )
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
 async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔍 Running manual scan...")
+    await update.message.reply_text("🔍 Scanning...")
     await run_scan(context.bot)
-    await update.message.reply_text("✅ Scan complete.")
+    await update.message.reply_text("✅ Done")
 
 async def watchlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if phase2b_watchlist:
-        msg = "👀 Phase 2B Watchlist:\n" + "\n".join(phase2b_watchlist)
+        items = "\n".join(f"  • {s}" for s in sorted(phase2b_watchlist))
+        msg = f"<b>Watchlist</b>\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n{items}"
     else:
-        msg = "📭 Watchlist is empty."
-    await update.message.reply_text(msg)
+        msg = "<b>Watchlist</b>\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n  Empty"
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 async def runners_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if alerted_today:
-        msg = "🏃 Today's Runners:\n" + "\n".join(alerted_today.keys())
+        items = "\n".join(f"  • {s}" for s in sorted(alerted_today.keys()))
+        msg = f"<b>Today's Runners</b>\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n{items}"
     else:
-        msg = "📭 No runners detected yet today."
-    await update.message.reply_text(msg)
+        msg = "<b>Today's Runners</b>\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n  None yet"
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     alerted_today.clear()
     daily_results.clear()
-    await update.message.reply_text("🔄 Alerted list cleared.")
+    await update.message.reply_text("✅ Alerts cleared")
 
 async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not daily_results:
-        await update.message.reply_text("📭 No signals today yet.")
+        await update.message.reply_text("No signals today yet.")
         return
     msg = build_daily_summary()
-    await update.message.reply_text(msg)
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
         msg = (
-            "⚙️ CURRENT SETTINGS:\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"RSI Overbought: {settings['rsi_overbought']}\n"
-            f"RSI Oversold: {settings['rsi_oversold']}\n"
-            f"BTC Dump Threshold: {settings['btc_dump_threshold']}%\n"
-            f"Volume Multiplier: {settings['volume_multiplier']}x\n"
-            f"Wick Ratio Filter: {settings['wick_ratio']}\n"
-            f"Min Score: {settings['min_score']}\n"
-            f"Max Alerts/Scan: {settings['max_alerts_per_scan']}\n\n"
-            "To change: /settings <key> <value>\n"
-            "Example: /settings volume_multiplier 4.0"
+            "<b>Settings</b>\n"
+            "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n"
+            f"  <b>rsi_overbought</b>     {settings['rsi_overbought']}\n"
+            f"  <b>rsi_oversold</b>       {settings['rsi_oversold']}\n"
+            f"  <b>btc_dump_threshold</b> {settings['btc_dump_threshold']}%\n"
+            f"  <b>volume_multiplier</b>  {settings['volume_multiplier']}x\n"
+            f"  <b>wick_ratio</b>         {settings['wick_ratio']}\n"
+            f"  <b>min_score</b>          {settings['min_score']}\n"
+            f"  <b>max_alerts_per_scan</b> {settings['max_alerts_per_scan']}\n\n"
+            "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n"
+            "<code>/settings key value</code>"
         )
-        await update.message.reply_text(msg)
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
         return
 
     if len(args) == 2:
@@ -128,13 +135,13 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if key in settings:
             try:
                 settings[key] = float(value)
-                await update.message.reply_text(f"✅ {key} set to {settings[key]}")
+                await update.message.reply_text(f"✅ <b>{key}</b> → {settings[key]}", parse_mode=ParseMode.HTML)
             except ValueError:
                 await update.message.reply_text("❌ Value must be a number.")
         else:
-            await update.message.reply_text(f"❌ Unknown setting: {key}")
+            await update.message.reply_text(f"❌ Unknown: {key}")
     else:
-        await update.message.reply_text("Usage: /settings <key> <value>")
+        await update.message.reply_text("<code>/settings key value</code>", parse_mode=ParseMode.HTML)
 
 # =============================
 # FETCH DATA
@@ -493,32 +500,56 @@ def format_alert(symbol, signal_type, df, extra_info=""):
         vol_ratio=extra_info.get('vol_ratio', 0) if isinstance(extra_info, dict) else 0
     )
 
-    # Score label
+    # Grade icon
     if composite >= 80:
-        grade = "🔥A+"
+        grade = "🟢"
     elif composite >= 65:
-        grade = "✅A"
+        grade = "🔵"
     elif composite >= 50:
-        grade = "🟡B"
+        grade = "🟡"
     else:
-        grade = "⚪C"
+        grade = "⚪"
 
-    header = ""
-    if isinstance(extra_info, dict) and 'header' in extra_info:
-        header = extra_info['header']
+    # Signal type label (short)
+    type_labels = {
+        'volume_explosion': '🔥 Explosion',
+        'runner': '📈 Runner',
+        'accumulation': '⚡ Accumulation',
+        'volume_breakout': '💥 Breakout',
+        'early_surge': '⚡ Surge',
+        'breakout': '🚀 Breakout',
+        'early_accumulation': '🌀 Early Accum',
+    }
+    label = type_labels.get(signal_type, signal_type)
 
-    vol_str = ""
-    chg_str = ""
+    # Extract base token name
+    base = symbol.split("/")[0]
+
+    # Build clean card
+    vol_line = ""
+    chg_line = ""
     if isinstance(extra_info, dict):
         if 'vol_ratio' in extra_info:
-            vol_str = f" | Vol {extra_info['vol_ratio']:.1f}x"
+            vol_line = f"  <b>Volume:</b>  {extra_info['vol_ratio']:.1f}x avg\n"
         if 'price_change' in extra_info:
-            chg_str = f" | {extra_info['price_change']:+.1f}%"
+            chg_pct = extra_info['price_change']
+            arrow = "▲" if chg_pct >= 0 else "▼"
+            chg_line = f"  <b>Change:</b>  {arrow} {abs(chg_pct):.2f}%\n"
 
     msg = (
-        f"{header}\n"
-        f"{grade} {composite}/100 | RSI {rsi:.0f}{vol_str}{chg_str}\n"
-        f"Entry ${levels['entry']:.6g} → TP ${levels['tp1']:.6g} / ${levels['tp2']:.6g} | SL ${levels['sl']:.6g} (R:R {levels['rr']:.1f})"
+        f"<b>{base}</b> ({symbol})\n"
+        f"  {label}\n"
+        f"▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n"
+        f"  <b>Score:</b>   {grade} {composite}/100\n"
+        f"  <b>RSI:</b>     {rsi:.0f}\n"
+        f"{vol_line}"
+        f"{chg_line}"
+        f"▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n"
+        f"  <b>Entry:</b>   <code>${levels['entry']:.6g}</code>\n"
+        f"  <b>TP1:</b>     <code>${levels['tp1']:.6g}</code>\n"
+        f"  <b>TP2:</b>     <code>${levels['tp2']:.6g}</code>\n"
+        f"  <b>SL:</b>      <code>${levels['sl']:.6g}</code>\n"
+        f"  <b>R:R:</b>     {levels['rr']:.1f}"
     )
 
     return msg, composite
@@ -528,7 +559,7 @@ def format_alert(symbol, signal_type, df, extra_info=""):
 # =============================
 def build_daily_summary():
     if not daily_results:
-        return "📭 No signals today."
+        return "No signals today."
 
     total = len(daily_results)
     avg_score = sum(r['score'] for r in daily_results) / total
@@ -540,22 +571,19 @@ def build_daily_summary():
         by_type[t] = by_type.get(t, 0) + 1
 
     msg = (
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "📋 DAILY SUMMARY\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📊 Total Signals: {total}\n"
-        f"🏆 Avg Score: {avg_score:.0f}/100\n\n"
-        "📈 Signal Breakdown:\n"
+        "<b>Daily Summary</b>\n"
+        "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n"
+        f"  <b>Signals:</b>  {total}\n"
+        f"  <b>Avg Score:</b>  {avg_score:.0f}/100\n\n"
     )
 
     for t, count in sorted(by_type.items(), key=lambda x: x[1], reverse=True):
-        msg += f"  {t}: {count}\n"
+        msg += f"  {t}  ×{count}\n"
 
-    msg += "\n🏅 Top 5 Signals:\n"
+    msg += "\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n<b>Top Signals</b>\n\n"
     for i, r in enumerate(top_signals, 1):
-        msg += f"  {i}. {r['symbol']} — {r['score']}/100 ({r['signal_type']})\n"
+        msg += f"  {i}. <b>{r['symbol']}</b>  {r['score']}/100\n"
 
-    msg += "━━━━━━━━━━━━━━━━━━━━━━"
     return msg
 
 # =============================
@@ -566,11 +594,12 @@ def scan_market_sync():
     btc_dumping, btc_change = is_btc_dumping()
     if btc_dumping:
         msg = (
-            f"🐻 BTC DUMP DETECTED: {btc_change:+.2f}%\n"
-            f"Scanning paused — market conditions unsafe.\n"
-            f"Threshold: {settings['btc_dump_threshold']}%"
+            f"<b>Scan Paused</b>\n"
+            f"▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n"
+            f"  BTC  ▼ {abs(btc_change):.2f}%\n"
+            f"  Threshold: {settings['btc_dump_threshold']}%"
         )
-        print(msg)
+        print(f"BTC dump: {btc_change:+.2f}%")
         return [msg]
 
     markets = exchange.load_markets()
@@ -618,27 +647,23 @@ def scan_market_sync():
                 phase2b_watchlist.add(symbol)
 
             if volume_accelerating(df) and early_explosion(df):
-                header = f"⚡ EARLY VOLUME SURGE: {symbol}"
                 full_msg, composite = format_alert(symbol, 'early_surge', df, {
-                    'header': header,
                     'vol_ratio': df['volume'].iloc[-1] / (df['volume'].iloc[-2] + 1e-9),
                     'price_change': (df['close'].iloc[-1] - df['close'].iloc[-2]) / (df['close'].iloc[-2] + 1e-9) * 100,
                 })
                 if composite >= settings['min_score']:
-                    print(header)
+                    print(f"early_surge: {symbol} ({composite})")
                     alerts.append((full_msg, composite))
                     alerted_today[symbol] = now
                 daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_surge'})
                 continue
 
             if symbol in phase2b_watchlist and is_breakout(df):
-                header = f"🚀 GEM BREAKOUT: {symbol}"
                 full_msg, composite = format_alert(symbol, 'breakout', df, {
-                    'header': header,
                     'vol_ratio': df['volume'].iloc[-1] / (df['volume'][:-1].mean() + 1e-9),
                 })
                 if composite >= settings['min_score']:
-                    print(header)
+                    print(f"breakout: {symbol} ({composite})")
                     alerts.append((full_msg, composite))
                     alerted_today[symbol] = now
                 daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'breakout'})
@@ -648,7 +673,6 @@ def scan_market_sync():
             # --- Runner detection (all coins) ---
             result = detect_runner(symbol, df)
             if result:
-                header = f"{result['type']}: {symbol}"
                 signal_map = {
                     '🔥 VOLUME EXPLOSION': 'volume_explosion',
                     '📈 RUNNER': 'runner',
@@ -658,12 +682,11 @@ def scan_market_sync():
                 sig_type = signal_map.get(result['type'], 'runner')
 
                 full_msg, composite = format_alert(symbol, sig_type, df, {
-                    'header': header,
                     'vol_ratio': result['vol_ratio'],
                     'price_change': result['price_change'],
                 })
                 if composite >= settings['min_score']:
-                    print(header)
+                    print(f"{sig_type}: {symbol} ({composite})")
                     alerts.append((full_msg, composite))
                     alerted_today[symbol] = now
                 daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': sig_type})
@@ -672,14 +695,12 @@ def scan_market_sync():
             # --- Early accumulation detection ---
             accum = detect_early_accumulation(symbol, df)
             if accum:
-                header = f"{accum['type']}: {symbol}"
                 full_msg, composite = format_alert(symbol, 'early_accumulation', df, {
-                    'header': header,
                     'vol_ratio': accum['vol_ratio'],
                     'price_change': accum['price_change'],
                 })
                 if composite >= settings['min_score']:
-                    print(header)
+                    print(f"early_accumulation: {symbol} ({composite})")
                     alerts.append((full_msg, composite))
                     alerted_today[symbol] = now
                 daily_results.append({'symbol': symbol, 'score': composite, 'signal_type': 'early_accumulation'})
@@ -695,8 +716,9 @@ def scan_market_sync():
     # Phase 2B summary
     phase2b_best.sort(key=lambda x: x[1], reverse=True)
     if phase2b_best:
-        msg = "💎 GEM SETUPS: " + " | ".join(f"{s} {sc}/100" for s, sc in phase2b_best[:3])
-        print(msg)
+        lines = "\n".join(f"  • <b>{s}</b>  {sc}/100" for s, sc in phase2b_best[:3])
+        msg = f"<b>💎 Gem Setups</b>\n{lines}"
+        print(f"Gems: {[s for s,_ in phase2b_best[:3]]}")
         top_alerts.append(msg)
 
     scanned = len([s for s in markets if "/USDT" in s and s.split("/")[0] not in EXCLUDED_BASES])
@@ -712,18 +734,18 @@ async def run_scan(bot: Bot):
     alerts = await loop.run_in_executor(None, scan_market_sync)
     if not alerts:
         return
-    # Batch all alerts into one message (Telegram limit 4096 chars)
-    batch = "\n━━━━━━━━━━━━━━━━━━━━━━\n".join(alerts)
-    # Split if too long for Telegram
+    # Batch alerts into messages (Telegram limit 4096 chars)
+    separator = "\n\n"
+    batch = separator.join(alerts)
     while batch:
         chunk = batch[:4000]
-        # Try to split at a separator boundary
         if len(batch) > 4000:
-            last_sep = chunk.rfind("━━━")
-            if last_sep > 0:
-                chunk = batch[:last_sep]
-        await bot.send_message(chat_id=CHAT_ID, text=chunk)
-        batch = batch[len(chunk):].lstrip("━\n ")
+            # Split at last double-newline to keep cards intact
+            last_break = chunk.rfind("\n\n")
+            if last_break > 0:
+                chunk = batch[:last_break]
+        await bot.send_message(chat_id=CHAT_ID, text=chunk, parse_mode=ParseMode.HTML)
+        batch = batch[len(chunk):].lstrip("\n ")
 
 # =============================
 # BACKGROUND SCANNER
@@ -743,7 +765,7 @@ async def scheduled_scan(context: ContextTypes.DEFAULT_TYPE):
 async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
     if daily_results:
         msg = build_daily_summary()
-        await context.bot.send_message(chat_id=CHAT_ID, text=msg)
+        await context.bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode=ParseMode.HTML)
     # Reset for new day
     alerted_today.clear()
     daily_results.clear()
